@@ -2,24 +2,31 @@ import os
 import streamlit as st
 import requests
 from tqdm import tqdm
+import re
 
 def download_file_from_google_drive(file_id, destination):
-    """Download a file from Google Drive using requests with progress bar"""
+    """Download a file from Google Drive with proper confirmation handling"""
     URL = "https://docs.google.com/uc?export=download"
     
     session = requests.Session()
     
+    # Initial request
     response = session.get(URL, params={'id': file_id}, stream=True)
-    token = None
+    response.raise_for_status()
     
-    # Check for confirmation token in cookies or content
+    # Check if we need to confirm the download
     for key, value in response.cookies.items():
         if key.startswith('download_warning'):
-            token = value
-    
-    if token:
-        params = {'id': file_id, 'confirm': token}
-        response = session.get(URL, params=params, stream=True)
+            params = {'id': file_id, 'confirm': value}
+            response = session.get(URL, params=params, stream=True)
+            break
+    else:
+        # Check for confirmation token in the HTML content
+        content = response.content
+        match = re.search(r'confirm=([0-9A-Za-z_]+)', content.decode('utf-8'))
+        if match:
+            params = {'id': file_id, 'confirm': match.group(1)}
+            response = session.get(URL, params=params, stream=True)
     
     # Get file size if available
     total_size = int(response.headers.get('content-length', 0))
@@ -31,6 +38,12 @@ def download_file_from_google_drive(file_id, destination):
                 if chunk:
                     f.write(chunk)
                     pbar.update(len(chunk))
+    
+    # Verify we got a valid file (not an HTML error page)
+    with open(destination, 'rb') as f:
+        content = f.read(1024)  # Read first KB to check content
+        if b'<!DOCTYPE html>' in content or b'<html' in content:
+            raise ValueError("Downloaded file appears to be an HTML page (likely a Google Drive error)")
 
 def download_models():
     """Download models from Google Drive if they don't exist locally"""
@@ -63,7 +76,7 @@ def download_models():
         # Verify the files are actual model files
         if os.path.getsize(resnet_path) < 100000:  # Should be several MB
             raise ValueError("ResNet model file is too small (likely an HTML error page)")
-        if os.path.getsize(svm_path) < 100000:  # Should be several MB
+        if os.path.getsize(svm_path) < 10000:  # SVM models are smaller but still >10KB
             raise ValueError("SVM model file is too small (likely an HTML error page)")
         
         st.success("Models downloaded successfully!")
