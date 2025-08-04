@@ -5,7 +5,7 @@ from tqdm import tqdm
 import re
 
 def download_file_from_google_drive(file_id, destination):
-    """Download a file from Google Drive with proper confirmation handling"""
+    """Download a file from Google Drive with proper binary handling"""
     URL = "https://docs.google.com/uc?export=download"
     
     session = requests.Session()
@@ -14,19 +14,19 @@ def download_file_from_google_drive(file_id, destination):
     response = session.get(URL, params={'id': file_id}, stream=True)
     response.raise_for_status()
     
-    # Check if we need to confirm the download
-    for key, value in response.cookies.items():
-        if key.startswith('download_warning'):
-            params = {'id': file_id, 'confirm': value}
-            response = session.get(URL, params=params, stream=True)
-            break
-    else:
-        # Check for confirmation token in the HTML content
-        content = response.content
-        match = re.search(r'confirm=([0-9A-Za-z_]+)', content.decode('utf-8'))
-        if match:
-            params = {'id': file_id, 'confirm': match.group(1)}
-            response = session.get(URL, params=params, stream=True)
+    # Check if we need to confirm the download (only if content appears to be HTML)
+    content_sample = response.content[:1024]
+    if b'<!DOCTYPE html>' in content_sample or b'<html' in content_sample:
+        try:
+            # Only decode if it's actually HTML
+            content_str = response.content.decode('utf-8', errors='ignore')
+            match = re.search(r'confirm=([0-9A-Za-z_]+)', content_str)
+            if match:
+                params = {'id': file_id, 'confirm': match.group(1)}
+                response = session.get(URL, params=params, stream=True)
+        except:
+            # If decoding fails, proceed with the current response
+            pass
     
     # Get file size if available
     total_size = int(response.headers.get('content-length', 0))
