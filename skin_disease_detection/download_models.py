@@ -2,48 +2,106 @@ import os
 import streamlit as st
 import requests
 from tqdm import tqdm
+import time
 import re
+import logging
 
-def download_file_from_google_drive(file_id, destination):
-    """Download a file from Google Drive with proper binary handling"""
+# Set up logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+def is_html_content(content):
+    """Check if content appears to be HTML"""
+    content_str = content[:1024].decode('utf-8', errors='ignore').lower()
+    return ('<!doctype html' in content_str or 
+            '<html' in content_str or 
+            'google drive' in content_str or 
+            'sign in' in content_str or
+            'too many users' in content_str or
+            'download warning' in content_str)
+
+def get_confirm_token(content):
+    """Extract confirmation token from HTML content"""
+    content_str = content.decode('utf-8', errors='ignore')
+    match = re.search(r'confirm=([0-9A-Za-z_]+)', content_str)
+    if match:
+        return match.group(1)
+    
+    # Alternative pattern for newer Google Drive pages
+    match = re.search(r'name="confirm" value="([^"]+)"', content_str)
+    if match:
+        return match.group(1)
+    
+    return None
+
+def download_file_from_google_drive(file_id, destination, max_retries=3):
+    """Download a file from Google Drive with robust error handling"""
     URL = "https://docs.google.com/uc?export=download"
     
-    session = requests.Session()
-    
-    # Initial request
-    response = session.get(URL, params={'id': file_id}, stream=True)
-    response.raise_for_status()
-    
-    # Check if we need to confirm the download (only if content appears to be HTML)
-    content_sample = response.content[:1024]
-    if b'<!DOCTYPE html>' in content_sample or b'<html' in content_sample:
+    for attempt in range(max_retries):
         try:
-            # Only decode if it's actually HTML
-            content_str = response.content.decode('utf-8', errors='ignore')
-            match = re.search(r'confirm=([0-9A-Za-z_]+)', content_str)
-            if match:
-                params = {'id': file_id, 'confirm': match.group(1)}
-                response = session.get(URL, params=params, stream=True)
-        except:
-            # If decoding fails, proceed with the current response
-            pass
-    
-    # Get file size if available
-    total_size = int(response.headers.get('content-length', 0))
-    
-    # Download with progress bar
-    with open(destination, "wb") as f:
-        with tqdm(total=total_size, unit='B', unit_scale=True, desc=os.path.basename(destination)) as pbar:
-            for chunk in response.iter_content(32768):
-                if chunk:
-                    f.write(chunk)
-                    pbar.update(len(chunk))
-    
-    # Verify we got a valid file (not an HTML error page)
-    with open(destination, 'rb') as f:
-        content = f.read(1024)  # Read first KB to check content
-        if b'<!DOCTYPE html>' in content or b'<html' in content:
-            raise ValueError("Downloaded file appears to be an HTML page (likely a Google Drive error)")
+            session = requests.Session()
+            
+            # Initial request
+            response = session.get(URL, params={'id': file_id}, stream=True, timeout=30)
+            response.raise_for_status()
+            
+            # Check for confirmation token in cookies
+            for key, value in response.cookies.items():
+                if key.startswith('download_warning'):
+                    params = {'id': file_id, 'confirm': value}
+                    response = session.get(URL, params=params, stream=True, timeout=30)
+                    break
+            
+            # If we got HTML content, try to extract confirmation token
+            if is_html_content(response.content):
+                token = get_confirm_token(response.content)
+                if token:
+                    st.info(f"Found confirmation token, attempt {attempt+1}/{max_retries}")
+                    params = {'id': file_id, 'confirm': token}
+                    response = session.get(URL, params=params, stream=True, timeout=30)
+            
+            # If still getting HTML, check for "Too many users" message
+            if is_html_content(response.content):
+                content_str = response.content[:1024].decode('utf-8', errors='ignore').lower()
+                if 'too many users' in content_str:
+                    wait_time = 2 ** attempt  # Exponential backoff
+                    st.warning(f"Google Drive rate limit hit. Waiting {wait_time} seconds before retry {attempt+1}/{max_retries}...")
+                    time.sleep(wait_time)
+                    continue
+            
+            # Check if we finally got binary content
+            if is_html_content(response.content):
+                # Save the HTML for debugging
+                with open("debug_google_drive.html", "wb") as f:
+                    f.write(response.content)
+                raise ValueError("Failed to download file - received HTML content after multiple attempts")
+            
+            # Get file size if available
+            total_size = int(response.headers.get('content-length', 0))
+            
+            # Download with progress bar
+            with open(destination, "wb") as f:
+                with tqdm(total=total_size, unit='B', unit_scale=True, desc=os.path.basename(destination)) as pbar:
+                    for chunk in response.iter_content(32768):
+                        if chunk:
+                            f.write(chunk)
+                            pbar.update(len(chunk))
+            
+            # Verify download
+            if os.path.getsize(destination) < 10000:  # Less than 10KB is suspicious
+                raise ValueError(f"Downloaded file is too small ({os.path.getsize(destination)} bytes)")
+                
+            return True
+            
+        except Exception as e:
+            if attempt < max_retries - 1:
+                wait_time = 2 ** (attempt + 1)
+                st.warning(f"Download attempt {attempt+1} failed: {str(e)}. Retrying in {wait_time} seconds...")
+                time.sleep(wait_time)
+            else:
+                st.error(f"Failed to download after {max_retries} attempts: {str(e)}")
+                raise
 
 def download_models():
     """Download models from Google Drive if they don't exist locally"""
@@ -67,17 +125,13 @@ def download_models():
     try:
         # Download ResNet model
         st.info(f"Downloading ResNet model...")
-        download_file_from_google_drive(resnet_file_id, resnet_path)
+        if not download_file_from_google_drive(resnet_file_id, resnet_path):
+            raise Exception("ResNet model download failed")
         
         # Download SVM model
         st.info(f"Downloading SVM model...")
-        download_file_from_google_drive(svm_file_id, svm_path)
-        
-        # Verify the files are actual model files
-        if os.path.getsize(resnet_path) < 100000:  # Should be several MB
-            raise ValueError("ResNet model file is too small (likely an HTML error page)")
-        if os.path.getsize(svm_path) < 10000:  # SVM models are smaller but still >10KB
-            raise ValueError("SVM model file is too small (likely an HTML error page)")
+        if not download_file_from_google_drive(svm_file_id, svm_path):
+            raise Exception("SVM model download failed")
         
         st.success("Models downloaded successfully!")
         return True
