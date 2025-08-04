@@ -386,20 +386,22 @@ img_size = (192, 192)
 @st.cache_resource
 def load_models():
     """Load the models once and cache them"""
+    models_dir = "models"  # Define the models directory
     try:
-        # Load SVM model
-        with open('svm_model_optimized.pkl', 'rb') as f:
+        # Load SVM model from models directory
+        with open(os.path.join(models_dir, 'svm_model_optimized.pkl'), 'rb') as f:
             svm_model = pickle.load(f)
         
-        # Load ResNet50 base model
-        resnet_model = load_model('resnet50_base_model.h5')
-        
+        # Load ResNet50 base model from models directory
+        resnet_model = load_model(os.path.join(models_dir, 'resnet50_base_model.h5'))
         st.success("Models loaded successfully!")
         return svm_model, resnet_model
     except Exception as e:
         st.error(f"Error loading models: {str(e)}")
         st.error("Please make sure the model files are in the correct location.")
-        st.stop()
+        st.error(f"Current working directory: {os.getcwd()}")
+        st.error(f"Looking in: {os.path.join(os.getcwd(), models_dir)}")
+        raise
 
 def preprocess_image(image):
     """Preprocess the image (same as your Flask app)"""
