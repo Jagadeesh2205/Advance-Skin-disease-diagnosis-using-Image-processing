@@ -1,32 +1,36 @@
 import os
-import gdown
 import streamlit as st
-import re
-from urllib.parse import urlparse
+import requests
+from tqdm import tqdm
 
-def clean_google_drive_url(url):
-    """Ensure Google Drive URL is in the correct format for gdown"""
-    # Extract file ID from various possible URL formats
-    parsed = urlparse(url)
+def download_file_from_google_drive(file_id, destination):
+    """Download a file from Google Drive using requests with progress bar"""
+    URL = "https://docs.google.com/uc?export=download"
     
-    # Case 1: Standard sharing link: https://drive.google.com/file/d/FILE_ID/view?usp=sharing
-    m = re.search(r"/file/d/([-\w_]+)/", url)
-    if m:
-        file_id = m.group(1)
-        return f"https://drive.google.com/uc?id={file_id}"
+    session = requests.Session()
     
-    # Case 2: Direct ID format: https://drive.google.com/open?id=FILE_ID
-    m = re.search(r"id=([-\w_]+)", url)
-    if m:
-        file_id = m.group(1)
-        return f"https://drive.google.com/uc?id={file_id}"
+    response = session.get(URL, params={'id': file_id}, stream=True)
+    token = None
     
-    # Case 3: Already in uc format
-    if "drive.google.com/uc" in url and "id=" in url:
-        return url
+    # Check for confirmation token in cookies or content
+    for key, value in response.cookies.items():
+        if key.startswith('download_warning'):
+            token = value
     
-    # If we can't parse it, return original (gdown might handle it with fuzzy=True)
-    return url
+    if token:
+        params = {'id': file_id, 'confirm': token}
+        response = session.get(URL, params=params, stream=True)
+    
+    # Get file size if available
+    total_size = int(response.headers.get('content-length', 0))
+    
+    # Download with progress bar
+    with open(destination, "wb") as f:
+        with tqdm(total=total_size, unit='B', unit_scale=True, desc=os.path.basename(destination)) as pbar:
+            for chunk in response.iter_content(32768):
+                if chunk:
+                    f.write(chunk)
+                    pbar.update(len(chunk))
 
 def download_models():
     """Download models from Google Drive if they don't exist locally"""
@@ -43,28 +47,23 @@ def download_models():
     
     st.info("Downloading model files (this may take a few minutes)...")
     
-    # Original URLs (could be in any format)
-    resnet_url = "https://drive.google.com/file/d/182OmtnTmFW8WfHEw1tHwnUhMp4VkZFGC/view?usp=sharing"
-    svm_url = "https://drive.google.com/file/d/1kWnR-WP70b-JvCbmpc81wdrx0bhOYUo-/view?usp=sharing"
-    
-    # Clean and standardize the URLs
-    resnet_url = clean_google_drive_url(resnet_url)
-    svm_url = clean_google_drive_url(svm_url)
-    
-    st.info(f"Using cleaned ResNet URL: {resnet_url}")
-    st.info(f"Using cleaned SVM URL: {svm_url}")
+    # File IDs only (no URLs needed)
+    resnet_file_id = "182OmtnTmFW8WfHEw1tHwnUhMp4VkZFGC"
+    svm_file_id = "1kWnR-WP70b-JvCbmpc81wdrx0bhOYUo-"
     
     try:
         # Download ResNet model
-        gdown.download(resnet_url, resnet_path, quiet=False, fuzzy=True)
+        st.info(f"Downloading ResNet model...")
+        download_file_from_google_drive(resnet_file_id, resnet_path)
         
         # Download SVM model
-        gdown.download(svm_url, svm_path, quiet=False, fuzzy=True)
+        st.info(f"Downloading SVM model...")
+        download_file_from_google_drive(svm_file_id, svm_path)
         
-        # Verify the files are actual model files, not HTML error pages
-        if os.path.getsize(resnet_path) < 100000:  # HDF5 files should be large
+        # Verify the files are actual model files
+        if os.path.getsize(resnet_path) < 100000:  # Should be several MB
             raise ValueError("ResNet model file is too small (likely an HTML error page)")
-        if os.path.getsize(svm_path) < 100000:  # Pickle files should be large
+        if os.path.getsize(svm_path) < 100000:  # Should be several MB
             raise ValueError("SVM model file is too small (likely an HTML error page)")
         
         st.success("Models downloaded successfully!")
