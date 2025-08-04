@@ -1,3 +1,4 @@
+import os
 from download_models import download_models
 
 # Download models before loading them
