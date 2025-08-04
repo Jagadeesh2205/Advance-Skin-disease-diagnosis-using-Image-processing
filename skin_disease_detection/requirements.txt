@@ -1,0 +1,7 @@
+streamlit==1.32.0
+numpy==1.21.6
+opencv-python==4.5.5.64
+tensorflow==2.10.0
+scikit-learn==1.0.2
+pillow==9.0.0
+gdown==4.7.1

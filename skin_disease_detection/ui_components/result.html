@@ -1,0 +1,169 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Prediction Result</title>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%);
+            min-height: 100vh;
+            margin: 0;
+            padding: 20px;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+        }
+        .container {
+            text-align: center;
+            background: rgba(255, 255, 255, 0.95);
+            padding: 30px;
+            border-radius: 15px;
+            box-shadow: 0 8px 32px rgba(31, 38, 135, 0.15);
+            max-width: 600px;
+            width: 90%;
+        }
+        h1 {
+            color: #2c3e50;
+            margin-bottom: 30px;
+            font-size: 2.2em;
+        }
+        .result-image {
+            max-width: 300px;
+            max-height: 300px;
+            border-radius: 8px;
+            margin: 20px auto;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+        }
+        .message {
+            font-size: 1.2em;
+            margin: 20px 0;
+            padding: 15px;
+            border-radius: 8px;
+            background: #f8f9fa;
+        }
+        .prediction {
+            font-weight: bold;
+            color: #0056b3;
+            font-size: 1.4em;
+        }
+        .confidence {
+            font-size: 1.1em;
+            color: #666;
+            margin: 15px 0;
+        }
+        .confidence-bar {
+            width: 80%;
+            height: 20px;
+            background: #e9ecef;
+            border-radius: 10px;
+            margin: 10px auto;
+            overflow: hidden;
+        }
+        .confidence-fill {
+            height: 100%;
+            background: linear-gradient(90deg, #0056b3, #00a8e8);
+            transition: width 1s ease-in-out;
+        }
+        .error {
+            color: #dc3545;
+            background: #f8d7da;
+            padding: 15px;
+            border-radius: 8px;
+            margin: 20px 0;
+        }
+        .btn {
+            display: inline-block;
+            color: white;
+            background: #0056b3;
+            text-decoration: none;
+            padding: 12px 30px;
+            border-radius: 25px;
+            margin: 10px;
+            transition: transform 0.2s ease, background 0.2s ease;
+            font-weight: 500;
+            cursor: pointer;
+        }
+        .btn:hover {
+            background: #003d82;
+            transform: translateY(-2px);
+        }
+        .btn-secondary {
+            background: #6c757d;
+        }
+        .btn-secondary:hover {
+            background: #5a6268;
+        }
+        .report-section {
+            margin-top: 25px;
+            padding-top: 20px;
+            border-top: 1px solid #eee;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Prediction Result</h1>
+        <div id="error-section" style="display: none;">
+            <p class="message error" id="error-message"></p>
+        </div>
+        
+        <div id="result-section">
+            <img id="result-image" class="result-image" style="display: none;">
+            <p class="message">
+                Predicted Disease: <span class="prediction" id="prediction"></span>
+            </p>
+            <p class="confidence">Confidence: <span id="confidence-value"></span>%</p>
+            <div class="confidence-bar">
+                <div class="confidence-fill" id="confidence-fill" style="width: 0%;"></div>
+            </div>
+            
+            <div class="report-section">
+                <h2>Next Steps</h2>
+                <button id="generate-report" class="btn">Generate Medical Report</button>
+                <button id="upload-another" class="btn btn-secondary">Upload Another Image</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // This script will be populated with data from Streamlit
+        document.addEventListener('DOMContentLoaded', function() {
+            const urlParams = new URLSearchParams(window.location.search);
+            const error = urlParams.get('error');
+            const prediction = urlParams.get('prediction');
+            const confidence = urlParams.get('confidence');
+            const diseaseId = urlParams.get('disease_id');
+            
+            if (error) {
+                document.getElementById('error-message').textContent = error;
+                document.getElementById('error-section').style.display = 'block';
+                document.getElementById('result-section').style.display = 'none';
+            } else if (prediction && confidence) {
+                document.getElementById('prediction').textContent = prediction;
+                document.getElementById('confidence-value').textContent = confidence;
+                document.getElementById('confidence-fill').style.width = confidence + '%';
+                
+                // In a real implementation, you'd need to handle the image differently
+                // This is just a placeholder for demonstration
+                document.getElementById('result-image').style.display = 'block';
+                
+                // Set up button handlers
+                document.getElementById('generate-report').onclick = function() {
+                    // In Streamlit, you'd need to use a different approach
+                    // This is just a placeholder
+                    window.parent.postMessage({
+                        type: 'streamlit:setComponentValue',
+                        args: {action: 'generate_report', disease_id: diseaseId}
+                    }, '*');
+                };
+                
+                document.getElementById('upload-another').onclick = function() {
+                    window.location.href = '/';
+                };
+            }
+        });
+    </script>
+</body>
+</html>
