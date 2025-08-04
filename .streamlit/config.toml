@@ -1,2 +1,3 @@
-[dependencies]
-apt = ["libgl1", "libglib2.0-0", "libsm6", "libxrender1", "libxext6"]
+[server]
+enableStaticServing = true
+apt_dependencies = ["libgl1", "libglib2.0-0", "libsm6", "libxrender1", "libxext6"]
