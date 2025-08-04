@@ -1,6 +1,5 @@
 import os
 import gdown
-import zipfile
 import streamlit as st
 
 def download_models():
@@ -18,15 +17,13 @@ def download_models():
     
     st.info("Downloading model files (this may take a few minutes)...")
     
-    # FIX: Use direct download URLs (uc?id= format)
+    # FIX: Use direct download URLs with uc?id= format
     resnet_url = "https://drive.google.com/uc?id=182OmtnTmFW8WfHEw1tHwnUhMp4VkZFGC"
     svm_url = "https://drive.google.com/uc?id=1kWnR-WP70b-JvCbmpc81wdrx0bhOYUo-"
     
     try:
-        # Download ResNet model
+        # FIX: Add fuzzy=True parameter
         gdown.download(resnet_url, resnet_path, quiet=False, fuzzy=True)
-        
-        # Download SVM model
         gdown.download(svm_url, svm_path, quiet=False, fuzzy=True)
         
         st.success("Models downloaded successfully!")
