@@ -1,10 +1,10 @@
 import os
+import streamlit as st
 from download_models import download_models
 
 # Download models before loading them
 if not download_models():
     st.stop()
-import streamlit as st
 import numpy as np
 import cv2
 import pickle
