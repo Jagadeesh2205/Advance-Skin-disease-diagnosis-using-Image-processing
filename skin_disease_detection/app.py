@@ -46,7 +46,7 @@ def load_minimal_svm_model(file_path):
     sv_file = file_path.replace('.pkl', '_support_vectors.npy')
     support_vectors = np.load(sv_file)
     
-    # Reconstruct the full model
+    # Create a new SVC with the same parameters
     from sklearn.svm import SVC
     full_model = SVC(
         kernel=minimal_model['kernel'],
@@ -56,23 +56,19 @@ def load_minimal_svm_model(file_path):
         random_state=minimal_model['random_state']
     )
     
-    # Set all attributes
-    full_model.support_ = minimal_model['support_']
-    full_model.n_support_ = minimal_model['n_support_']
-    full_model.dual_coef_ = minimal_model['dual_coef_']
-    full_model.intercept_ = minimal_model['intercept_']
-    full_model.classes_ = minimal_model['classes_']
-    full_model.support_vectors_ = support_vectors
-    
-    # Add any missing attributes with defaults
-    if not hasattr(full_model, 'fit_status_'):
-        full_model.fit_status_ = 0
-    if not hasattr(full_model, 'probA_'):
-        full_model.probA_ = None
-    if not hasattr(full_model, 'probB_'):
-        full_model.probB_ = None
-    if not hasattr(full_model, 'shape_fit_'):
-        full_model.shape_fit_ = (support_vectors.shape[1],)
+    # Update the model's internal state directly (bypassing read-only properties)
+    full_model.__dict__.update({
+        'support_': minimal_model['support_'],
+        'n_support_': minimal_model['n_support_'],
+        'dual_coef_': minimal_model['dual_coef_'],
+        'intercept_': minimal_model['intercept_'],
+        'classes_': minimal_model['classes_'],
+        'support_vectors_': support_vectors,
+        'fit_status_': 0,
+        'probA_': None,
+        'probB_': None,
+        'shape_fit_': (support_vectors.shape[1],)
+    })
     
     return full_model
 
