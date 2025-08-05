@@ -7,14 +7,13 @@ logger = logging.getLogger(__name__)
 
 def download_models():
     """Models are already in the repository - verify exact location"""
-    # Current working directory when app runs
-    current_dir = os.getcwd()
-    logger.info(f"Current working directory: {current_dir}")
+    # Get the directory where this script is located
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    logger.info(f"Script directory: {script_dir}")
     
-    # The models should be in the same directory as this script
-    models_dir = "models"
-    full_models_path = os.path.join(current_dir, models_dir)
-    logger.info(f"Looking for models in: {full_models_path}")
+    # The models should be in the models directory relative to this script
+    models_dir = os.path.join(script_dir, "models")
+    logger.info(f"Looking for models in: {models_dir}")
     
     # Check if all required model files exist
     svm_path = os.path.join(models_dir, "svm_model_optimized.pkl")
@@ -43,6 +42,6 @@ def download_models():
         missing_files.append("resnet50_base_model.h5")
     
     st.error(f"Error: Model files not found in repository. Missing: {', '.join(missing_files)}")
-    st.error(f"Current working directory: {current_dir}")
-    st.error(f"Looking in: {full_models_path}")
+    st.error(f"Script directory: {script_dir}")
+    st.error(f"Looking in: {models_dir}")
     return False
