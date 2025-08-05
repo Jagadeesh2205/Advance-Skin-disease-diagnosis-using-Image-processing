@@ -4,5 +4,6 @@ streamlit==1.32.0
 numpy==1.26.4
 opencv-python==4.8.1.78
 tensorflow==2.16.1
-scikit-learn==1.4.2
+scikit-learn==1.2.2
 pillow==10.3.0
+
