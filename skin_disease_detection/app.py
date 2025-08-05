@@ -363,7 +363,10 @@ DISEASE_INFO = {
 @st.cache_resource
 def load_models():
     """Load the models once and cache them"""
-    models_dir = "models"
+    # Get directory where this script is located
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    models_dir = os.path.join(script_dir, "models")
+    
     try:
         # Load minimal SVM model
         svm_model = load_minimal_svm_model(os.path.join(models_dir, 'svm_model_optimized.pkl'))
@@ -375,6 +378,8 @@ def load_models():
     except Exception as e:
         st.error(f"Error loading models: {str(e)}")
         st.error("Please make sure the model files are in the correct location.")
+        st.error(f"Script directory: {script_dir}")
+        st.error(f"Looking in: {models_dir}")
         raise
 
 def preprocess_image(image):
