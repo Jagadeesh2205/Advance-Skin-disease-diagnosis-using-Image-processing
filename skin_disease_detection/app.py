@@ -61,7 +61,14 @@ def load_minimal_svm_model(file_path):
     # Update the model's internal state directly (bypassing read-only properties)
     # Update the model's internal state directly (bypassing read-only properties)
     # Update the model's internal state directly (bypassing read-only properties)
+   # Update the model's internal state directly (bypassing read-only properties)
     full_model.__dict__.update({
+        # Critical private attributes (used internally by scikit-learn 1.4.2)
+        '_dual_coef': minimal_model['dual_coef_'],
+        '_intercept': minimal_model['intercept_'],
+        '_n_support': minimal_model['n_support_'],
+        '_sparse': False,
+        
         # Public attributes (with trailing underscore)
         'support_': minimal_model['support_'],
         'n_support_': minimal_model['n_support_'],
@@ -74,31 +81,20 @@ def load_minimal_svm_model(file_path):
         'probB_': None,
         'shape_fit_': (support_vectors.shape[1],),
         
-        # Private attributes (with leading underscore)
-        '_n_support': minimal_model['n_support_'],
-        '_dual_coef': minimal_model['dual_coef_'],
-        '_intercept': minimal_model['intercept_'],
-        
-        # Direct attribute names (no underscores)
+        # Add the missing attribute directly to __dict__ (bypassing __slots__)
         'dual_coef': minimal_model['dual_coef_'],
         'intercept': minimal_model['intercept_'],
         'n_support': minimal_model['n_support_'],
         'support': minimal_model['support_'],
         
         # Sparse attributes (both versions)
-        '_sparse': False,
         'sparse_': False,
         'sparse': False
     })
     
-    # Set additional attributes directly for maximum compatibility
-    full_model.dual_coef = minimal_model['dual_coef_']
-    full_model.intercept = minimal_model['intercept_']
-    full_model.n_support = minimal_model['n_support_']
-    full_model.support = minimal_model['support_']
-    full_model._sparse = False
-    full_model.sparse_ = False
-    full_model.sparse = False
+    # Force-add the critical attribute that scikit-learn 1.4.2 expects
+    if not hasattr(full_model, 'dual_coef'):
+        full_model.__dict__['dual_coef'] = minimal_model['dual_coef_']
         
     return full_model
 
