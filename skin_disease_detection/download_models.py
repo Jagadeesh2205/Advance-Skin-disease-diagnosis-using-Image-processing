@@ -2,14 +2,15 @@ import os
 import streamlit as st
 
 def download_models():
-    """Models are already in the repository thanks to Git LFS"""
+    """Models are already in the repository - just verify they exist"""
     models_dir = "models"
     
-    # Check if models already exist
-    resnet_path = os.path.join(models_dir, "resnet50_base_model.h5")
+    # Check if all required model files exist
     svm_path = os.path.join(models_dir, "svm_model_optimized.pkl")
+    svm_sv_path = os.path.join(models_dir, "svm_model_optimized_support_vectors.npy")
+    resnet_path = os.path.join(models_dir, "resnet50_base_model.h5")
     
-    if os.path.exists(resnet_path) and os.path.exists(svm_path):
+    if os.path.exists(svm_path) and os.path.exists(svm_sv_path) and os.path.exists(resnet_path):
         st.success("Models are ready to use!")
         return True
     
