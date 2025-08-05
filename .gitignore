@@ -6,7 +6,4 @@ __pycache__/
 venv/
 env/
 .python-version
-*.h5
-*.pkl
-static/
-uploads/
+
