@@ -60,6 +60,7 @@ def load_minimal_svm_model(file_path):
     # Update the model's internal state directly (bypassing read-only properties)
     # Update the model's internal state directly (bypassing read-only properties)
     # Update the model's internal state directly (bypassing read-only properties)
+    # Update the model's internal state directly (bypassing read-only properties)
     full_model.__dict__.update({
         # Public attributes (with trailing underscore)
         'support_': minimal_model['support_'],
@@ -82,6 +83,7 @@ def load_minimal_svm_model(file_path):
         'dual_coef': minimal_model['dual_coef_'],
         'intercept': minimal_model['intercept_'],
         'n_support': minimal_model['n_support_'],
+        'support': minimal_model['support_'],
         
         # Sparse attributes (both versions)
         '_sparse': False,
@@ -93,6 +95,7 @@ def load_minimal_svm_model(file_path):
     full_model.dual_coef = minimal_model['dual_coef_']
     full_model.intercept = minimal_model['intercept_']
     full_model.n_support = minimal_model['n_support_']
+    full_model.support = minimal_model['support_']
     full_model._sparse = False
     full_model.sparse_ = False
     full_model.sparse = False
