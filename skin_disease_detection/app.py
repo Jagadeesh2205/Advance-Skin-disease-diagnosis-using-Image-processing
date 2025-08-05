@@ -57,9 +57,11 @@ def load_minimal_svm_model(file_path):
     )
     
     # Update the model's internal state directly (bypassing read-only properties)
+    # Update the model's internal state directly (bypassing read-only properties)
     full_model.__dict__.update({
         'support_': minimal_model['support_'],
         'n_support_': minimal_model['n_support_'],
+        '_n_support': minimal_model['n_support_'],  # CRITICAL FIX - add this line
         'dual_coef_': minimal_model['dual_coef_'],
         'intercept_': minimal_model['intercept_'],
         'classes_': minimal_model['classes_'],
@@ -67,8 +69,7 @@ def load_minimal_svm_model(file_path):
         'fit_status_': 0,
         'probA_': None,
         'probB_': None,
-        'shape_fit_': (support_vectors.shape[1],),
-        '_sparse': False  # Critical fix for version compatibility
+        'shape_fit_': (support_vectors.shape[1],)
     })
         
     return full_model
