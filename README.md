@@ -139,21 +139,6 @@ if gpus:
         )
 ```
 
-## 📂 Project Structure
-
-```
-skin-disease-detection/
-├── app.py                   # Main Flask application
-├── disease_data.py          # Medical information for all skin conditions
-├── requirements.txt         # Python dependencies
-├── static/                  # Static assets
-│   └── uploads/             # Directory for user-uploaded images
-└── templates/               # HTML templates
-    ├── index.html           # Home page with upload form
-    ├── result.html          # Prediction results page
-    ├── report.html          # Detailed medical report
-    └── error.html           # Error handling page
-```
 
 ## 🚀 Running the Application
 
