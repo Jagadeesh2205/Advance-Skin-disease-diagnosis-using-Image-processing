@@ -1,222 +1,307 @@
 import os
-import streamlit as st
-import logging
-# Set up logging
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
-
-from download_models import download_models
-
-# Download models before loading them
-logger.info("Starting model verification process...")
-if not download_models():
-    logger.error("Model verification failed - stopping app")
-    st.stop()
-else:
-    logger.info("Model verification successful - proceeding with app")
-
 import numpy as np
 import cv2
 import pickle
 from tensorflow.keras.models import load_model
 from tensorflow.keras.applications.resnet50 import preprocess_input
-import os
 from PIL import Image
 import logging
-import numpy as np
+from flask import Flask, render_template, request, redirect, url_for
+import tensorflow as tf
 
-# Set up logging
+# CRITICAL FIX: Force CPU mode to avoid GPU memory issues
+os.environ["CUDA_VISIBLE_DEVICES"] = "-1"
+print("INFO: Forcing TensorFlow to use CPU only (to prevent GPU memory errors)")
+
+# Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# Set page config
-st.set_page_config(
-    page_title="Skin Disease Detection",
-    page_icon="🏥",
-    layout="wide"
-)
+# Get the directory where app.py is located
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+print(f"Current working directory: {os.getcwd()}")
+print(f"BASE_DIR (app.py location): {BASE_DIR}")
 
-def load_minimal_svm_model(file_path):
-    """Load the minimal SVM model and reconstruct it for use"""
-    # Load the minimal model structure
-    with open(file_path, 'rb') as f:
-        minimal_model = pickle.load(f)
+# Define the template directory - THIS IS CRITICAL FOR TEMPLATE NOT FOUND ERROR
+# Try multiple possible locations for templates
+template_dir = None
+possible_template_dirs = [
+    # Option 1: templates in ui_components folder at same level as app.py
+    os.path.join(BASE_DIR, 'ui_components'),
+    # Option 2: templates in templates folder at same level as app.py
+    os.path.join(BASE_DIR, 'templates'),
+    # Option 3: templates in parent directory's ui_components
+    os.path.join(os.path.dirname(BASE_DIR), 'ui_components'),
+    # Option 4: templates in parent directory's templates
+    os.path.join(os.path.dirname(BASE_DIR), 'templates')
+]
+
+# Find the first valid template directory
+for possible_dir in possible_template_dirs:
+    if os.path.exists(possible_dir):
+        template_dir = possible_dir
+        break
+
+# If no template directory found, try to create one
+if template_dir is None:
+    logger.warning("No template directory found. Creating default template directory.")
+    template_dir = os.path.join(BASE_DIR, 'templates')
+    os.makedirs(template_dir, exist_ok=True)
     
-    # Load support vectors
-    sv_file = file_path.replace('.pkl', '_support_vectors.npy')
-    support_vectors = np.load(sv_file)
+    # Check if HTML files exist in current directory and copy them
+    for filename in ['index.html', 'result.html', 'report.html', 'error.html']:
+        if os.path.exists(filename):
+            import shutil
+            shutil.copy(filename, os.path.join(template_dir, filename))
+            logger.info(f"Copied {filename} to template directory")
     
-    # Create a new SVC with the same parameters
-    from sklearn.svm import SVC
-    full_model = SVC(
-        kernel=minimal_model['kernel'],
-        C=minimal_model['C'],
-        gamma=minimal_model['gamma'],
-        probability=False,
-        random_state=minimal_model['random_state']
-    )
-    
-    # Update the model's internal state directly (bypassing read-only properties)
-    # Update the model's internal state directly (bypassing read-only properties)
-    # Update the model's internal state directly (bypassing read-only properties)
-    # Update the model's internal state directly (bypassing read-only properties)
-    # Update the model's internal state directly (bypassing read-only properties)
-   # Update the model's internal state directly (bypassing read-only properties)
-    full_model.__dict__.update({
-        # Critical private attributes (used internally by scikit-learn 1.4.2)
-        '_dual_coef': minimal_model['dual_coef_'],
-        '_intercept': minimal_model['intercept_'],
-        '_n_support': minimal_model['n_support_'],
-        '_sparse': False,
+    # If still no HTML files, create basic ones
+    if not any(f.endswith('.html') for f in os.listdir(template_dir)):
+        logger.warning("No HTML templates found. Creating minimal templates.")
         
-        # Public attributes (with trailing underscore)
-        'support_': minimal_model['support_'],
-        'n_support_': minimal_model['n_support_'],
-        'dual_coef_': minimal_model['dual_coef_'],
-        'intercept_': minimal_model['intercept_'],
-        'classes_': minimal_model['classes_'],
-        'support_vectors_': support_vectors,
-        'fit_status_': 0,
-        'probA_': None,
-        'probB_': None,
-        'shape_fit_': (support_vectors.shape[1],),
+        # Create a minimal index.html
+        with open(os.path.join(template_dir, 'index.html'), 'w') as f:
+            f.write('''
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Skin Disease Detection</title>
+</head>
+<body>
+    <h1>Upload an image for skin disease detection</h1>
+    <form action="/predict" method="post" enctype="multipart/form-data">
+        <input type="file" name="file" accept="image/*" required>
+        <button type="submit">Analyze</button>
+    </form>
+</body>
+</html>
+            ''')
         
-        # Add the missing attribute directly to __dict__ (bypassing __slots__)
-        'dual_coef': minimal_model['dual_coef_'],
-        'intercept': minimal_model['intercept_'],
-        'n_support': minimal_model['n_support_'],
-        'support': minimal_model['support_'],
+        # Create minimal result.html
+        with open(os.path.join(template_dir, 'result.html'), 'w') as f:
+            f.write('''
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Prediction Result</title>
+</head>
+<body>
+    <h1>Prediction Result</h1>
+    <p>Predicted Disease: {{ prediction }}</p>
+    <p>Confidence: {{ confidence }}%</p>
+    <a href="/report/{{ disease_id }}">Generate Medical Report</a>
+    <a href="/">Upload Another Image</a>
+</body>
+</html>
+            ''')
         
-        # Sparse attributes (both versions)
-        'sparse_': False,
-        'sparse': False
-    })
-    
-    # Force-add the critical attribute that scikit-learn 1.4.2 expects
-    if not hasattr(full_model, 'dual_coef'):
-        full_model.__dict__['dual_coef'] = minimal_model['dual_coef_']
+        # Create minimal report.html
+        with open(os.path.join(template_dir, 'report.html'), 'w') as f:
+            f.write('''
+<!DOCTYPE html>
+<html>
+<head>
+    <title>{{ disease.name }} Report</title>
+</head>
+<body>
+    <h1>{{ disease.name }} Medical Report</h1>
+    <h2>Overview</h2>
+    <p>{{ disease.description }}</p>
+    <h2>Causes</h2>
+    <ul>
+    {% for cause in disease.causes %}
+        <li>{{ cause }}</li>
+    {% endfor %}
+    </ul>
+    <a href="/">Analyze Another Image</a>
+</body>
+</html>
+            ''')
         
-    return full_model
+        # Create minimal error.html
+        with open(os.path.join(template_dir, 'error.html'), 'w') as f:
+            f.write('''
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Error</title>
+</head>
+<body>
+    <h1>Error</h1>
+    <p>{{ message }}</p>
+    <a href="/">Return to Home Page</a>
+</body>
+</html>
+            ''')
+
+# Verify template directory
+print(f"Using template directory: {template_dir}")
+print("Files in template directory:")
+for f in os.listdir(template_dir):
+    print(f"  - {f}")
+
+# Initialize Flask app with the correct template folder
+app = Flask(__name__,
+            template_folder=template_dir,
+            static_folder=os.path.join(BASE_DIR, 'static'))
+
+# Configure upload settings
+app.config['UPLOAD_FOLDER'] = os.path.join(BASE_DIR, 'uploads')
+app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024  # 16MB max upload
+
+# Create upload folder if it doesn't exist
+os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
+
+# Your local model paths
+MODEL_DIR = r"C:\Users\A JAGADEESH\Documents\machine learning\Advance Skin Disease project\Advanced-Skin-Diseases-Diagnosis-Leveraging-Image-Processing-main\skin_disease_detection\skin_disease_detection\models"
+SVM_MODEL_PATH = os.path.join(MODEL_DIR, "svm_model_optimized.pkl")
+RESNET_MODEL_PATH = os.path.join(MODEL_DIR, "resnet50_base_model.h5")
 
 # Disease information
 DISEASE_INFO = {
     'VI-chickenpox': {
         'name': 'Chickenpox',
-        'description': 'Chickenpox is a highly contagious disease caused by the initial infection with the varicella zoster virus (VZV). It is characterized by a distinctive itchy rash that forms small, fluid-filled blisters that eventually scab over.',
+        'description': 'Chickenpox is a highly contagious viral infection caused by the varicella-zoster virus (VZV). It is characterized by an itchy, blister-like rash that appears first on the chest, back, and face, then spreads over the entire body.',
         'causes': [
-            'Caused by the varicella-zoster virus (a member of the herpesvirus family)',
-            'Spreads through direct contact with the rash or through airborne droplets',
-            'Highly contagious 1-2 days before rash appears until all blisters have scabbed over',
-            'More common in children but can affect adults with more severe symptoms'
+            'Caused by the varicella-zoster virus (VZV)',
+            'Spreads through direct contact with the rash',
+            'Airborne transmission through coughing or sneezing',
+            'Can be transmitted from shingles to someone who has never had chickenpox'
         ],
         'symptoms': [
-            'Red, itchy rash that starts on face and chest, then spreads',
-            'Fluid-filled blisters that break and scab over',
+            'Itchy, red blisters all over the body',
             'Fever',
-            'Headache',
             'Fatigue',
-            'Loss of appetite'
+            'Loss of appetite',
+            'Headache',
+            'Flu-like symptoms 1-2 days before rash appears'
+        ],
+        'complications': [
+            'Skin infections from scratching',
+            'Pneumonia',
+            'Encephalitis (brain inflammation)',
+            'Bleeding problems',
+            'Dehydration',
+            'Complications in pregnancy affecting the fetus'
         ],
         'treatment': [
-            'Antiviral medications for severe cases or high-risk individuals',
-            'Calamine lotion for itch relief',
+            'Antiviral medications (acyclovir) for high-risk patients',
+            'Calamine lotion for itching',
             'Antihistamines to reduce itching',
-            'Acetaminophen for fever (avoid aspirin in children)',
+            'Oatmeal baths to soothe skin',
+            'Acetaminophen for fever (never use aspirin)',
             'Keeping fingernails short to prevent infection from scratching'
         ],
         'prevention': [
-            'Varicella vaccine (highly effective)',
+            'Varicella vaccine (90% effective)',
             'Avoiding contact with infected individuals',
-            'Isolating infected individuals until all blisters have scabbed over',
+            'Isolation of infected persons until all blisters have crusted over',
             'Good hand hygiene'
         ],
-        'duration': '7-10 days',
+        'duration': '7-10 days from first symptom to complete healing',
         'when_to_see_doctor': [
-            'If you have a weakened immune system',
-            'If symptoms worsen after initial improvement',
+            'If rash spreads to eyes',
             'If fever lasts more than 4 days',
-            'If rash becomes very red, warm, or painful (signs of bacterial infection)',
-            'If you develop difficulty breathing or chest pain'
+            'If rash becomes very red, warm, or tender (signs of infection)',
+            'If difficulty walking (possible neurological complication)',
+            'If dehydration symptoms (urinating less, dry mouth)'
         ]
     },
-    'BA-cellulitis': {
+    'BA- cellulitis': {
         'name': 'Cellulitis',
-        'description': 'Cellulitis is a common, potentially serious bacterial skin infection. It appears as a swollen, red area of skin that feels hot and tender, and it may spread rapidly. Cellulitis usually affects the skin on the lower legs, but it can occur in other areas.',
+        'description': 'Cellulitis is a common, potentially serious bacterial skin infection that affects the deeper layers of skin (dermis and subcutaneous tissue). It appears as a swollen, red area of skin that feels hot and tender, and it may spread rapidly.',
         'causes': [
             'Most commonly caused by Streptococcus and Staphylococcus bacteria',
-            'Enters through cracks, cuts, or breaks in the skin',
+            'Enters through breaks in the skin (cuts, ulcers, insect bites)',
+            'Can develop after surgery',
             'More common in people with weakened immune systems',
-            'Can develop after skin injuries, surgery, or from skin conditions like eczema'
+            'Associated with conditions like athlete\'s foot or eczema that cause skin breaks'
         ],
         'symptoms': [
-            'Red area of skin that tends to expand',
-            'Swelling',
-            'Tenderness',
-            'Pain in the affected area',
-            'Warm skin',
-            'Fever',
-            'Red streaks extending from the affected area'
+            'Red, inflamed skin that appears swollen',
+            'Skin that feels warm or hot to the touch',
+            'Tenderness or pain in the affected area',
+            'Fever or chills',
+            'Red streaks extending from the affected area',
+            'Pus or drainage from the skin'
+        ],
+        'complications': [
+            'Blood infection (sepsis)',
+            'Bone infection (osteomyelitis)',
+            'Lymphangitis (infection of lymph vessels)',
+            'Recurrent cellulitis',
+            'Tissue death (gangrene)',
+            'Chronic swelling (lymphedema)'
         ],
         'treatment': [
-            'Oral antibiotics for mild cases',
+            'Oral antibiotics (typically for 5-14 days)',
             'Intravenous antibiotics for severe cases',
-            'Elevating the affected area',
-            'Keeping the area clean',
-            'Pain relievers as needed'
+            'Elevation of affected limb to reduce swelling',
+            'Pain medication as needed',
+            'Wound care for any breaks in the skin',
+            'Compression stockings for leg cellulitis'
         ],
         'prevention': [
-            'Wash wounds promptly with soap and water',
-            'Apply antibiotic ointment to breaks in the skin',
-            'Keep skin moisturized to prevent cracking',
-            'Wear protective footwear',
-            'Manage underlying conditions like diabetes'
+            'Prompt cleaning of cuts and scrapes',
+            'Moisturizing dry skin to prevent cracking',
+            'Wearing protective footwear',
+            'Managing underlying conditions like diabetes',
+            'Treating fungal infections like athlete\'s foot'
         ],
-        'duration': '7-10 days with proper antibiotic treatment',
+        'duration': 'Improvement typically seen within 3 days of starting antibiotics; full recovery in 7-10 days',
         'when_to_see_doctor': [
-            'If the redness and swelling spread rapidly',
-            'If you have a fever of 100.4°F (38°C) or higher',
+            'If redness or pain worsens',
+            'If fever develops',
             'If you have diabetes or a weakened immune system',
-            'If symptoms don\'t improve after 2-3 days of antibiotic treatment',
-            'If you develop nausea or vomiting'
+            'If symptoms don\'t improve after 2-3 days of antibiotics',
+            'If the affected area is near the eyes'
         ]
     },
     'FU-athlete-foot': {
         'name': 'Athlete\'s Foot',
-        'description': 'Athlete\'s foot (tinea pedis) is a fungal infection that affects the skin on the feet, particularly between the toes. It often causes itching, stinging, and burning sensations.',
+        'description': 'Athlete\'s foot (tinea pedis) is a common fungal infection that affects the skin on the feet, particularly between the toes. It thrives in warm, moist environments like shoes and socks.',
         'causes': [
             'Caused by various types of fungi (dermatophytes)',
-            'Thrives in warm, moist environments like shoes and socks',
-            'Spreads through direct contact or by touching contaminated surfaces',
-            'Common in athletes and people who wear tight shoes'
+            'Spreads in damp communal areas (locker rooms, showers, pools)',
+            'Wearing tight, closed shoes for long periods',
+            'Sharing towels, socks, or shoes with an infected person',
+            'Having sweaty feet or minor foot injuries'
         ],
         'symptoms': [
-            'Itching, stinging, and burning between toes and on soles',
-            'Itchy blisters',
+            'Itching, stinging, and burning between toes or on soles',
             'Cracking and peeling skin',
-            'Dry skin on soles and sides of feet',
-            'Raw skin',
-            'Discolored, thick toenails (if infection spreads)'
+            'Redness and scaling',
+            'Blisters that itch',
+            'Toenail discoloration if infection spreads'
+        ],
+        'complications': [
+            'Spread to other parts of the body (hands, groin, scalp)',
+            'Bacterial infection from excessive scratching',
+            'Chronic fungal nail infection (onychomycosis)',
+            'Cellulitis from skin breakdown',
+            'Recurrent infections'
         ],
         'treatment': [
             'Over-the-counter antifungal creams, sprays, or powders',
-            'Prescription antifungal medications for severe cases',
+            'Prescription-strength topical medications for severe cases',
+            'Oral antifungal medications for persistent infections',
             'Keeping feet clean and dry',
-            'Changing socks regularly',
+            'Changing socks frequently',
             'Using antifungal powder in shoes'
         ],
         'prevention': [
-            'Washing feet daily with soap and water',
-            'Thoroughly drying feet, especially between toes',
-            'Wearing clean, dry socks',
-            'Using sandals in public showers and pools',
+            'Wearing shower sandals in public showers',
+            'Wearing breathable shoes and moisture-wicking socks',
+            'Washing feet daily and drying thoroughly',
+            'Alternating shoes to allow them to dry completely',
             'Not sharing shoes, socks, or towels'
         ],
-        'duration': '2-4 weeks with proper treatment',
+        'duration': '2-4 weeks with proper treatment; can become chronic if untreated',
         'when_to_see_doctor': [
             'If symptoms don\'t improve after 2 weeks of OTC treatment',
-            'If the rash is painful or shows signs of infection',
-            'If the rash spreads to nails',
             'If you have diabetes',
+            'If signs of bacterial infection (increased redness, warmth, pus)',
+            'If the infection spreads to nails',
             'If you have a weakened immune system'
         ]
     },
@@ -231,11 +316,20 @@ DISEASE_INFO = {
             'More common in crowded environments like schools'
         ],
         'symptoms': [
-            'Red sores that quickly rupture and leak fluid or pus',
-            'Honey-colored crust that forms over sores',
-            'Itching',
+            'Red sores that quickly burst and form honey-colored crusts',
+            'Itchy rash',
             'Sores that increase in size and number',
-            'Swollen lymph nodes near the sores'
+            'Swollen lymph nodes near the infection',
+            'Pain around the sores',
+            'Fluid-filled blisters that may be clear or yellow'
+        ],
+        'complications': [
+            'Cellulitis',
+            'Kidney problems (poststreptococcal glomerulonephritis)',
+            'Scarring (rare)',
+            'Staphylococcal scalded skin syndrome',
+            'Spread to other parts of the body',
+            'Methicillin-resistant Staphylococcus aureus (MRSA) infection'
         ],
         'treatment': [
             'Topical antibiotic ointments (mupirocin)',
@@ -252,92 +346,113 @@ DISEASE_INFO = {
             'Not sharing personal items like towels or clothing',
             'Washing contaminated items in hot water'
         ],
-        'duration': '7-10 days with proper antibiotic treatment',
+        'duration': '2-3 weeks without treatment; 7-10 days with treatment',
         'when_to_see_doctor': [
-            'If the rash doesn\'t improve after 2 weeks of OTC treatment',
-            'If the rash is painful or shows signs of infection',
-            'If the rash is on your scalp',
-            'If you have a weakened immune system',
-            'If the rash spreads rapidly'
+            'If rash is widespread or painful',
+            'If fever develops',
+            'If symptoms don\'t improve after 3 days of treatment',
+            'If signs of cellulitis (increasing redness, warmth)',
+            'If the person has a weakened immune system'
         ]
     },
     'FU-nail-fungus': {
         'name': 'Nail Fungus',
-        'description': 'Nail fungus (onychomycosis) is a common condition that begins as a white or yellow spot under the tip of your fingernail or toenail. As the fungal infection goes deeper, it may cause your nail to discolor, thicken and crumble at the edge.',
+        'description': 'Nail fungus (onychomycosis) is a common condition that begins as a white or yellow spot under the tip of your fingernail or toenail. As the fungal infection goes deeper, it may cause your nail to discolor, thicken and develop crumbling edges.',
         'causes': [
-            'Caused by various fungal organisms, including dermatophytes, yeasts, and molds',
-            'More common in older adults as nails become drier and more brittle',
-            'Spreads through direct contact or contaminated surfaces',
-            'More common in people with reduced blood circulation or weakened immune systems'
+            'Caused by various fungi including dermatophytes, yeasts, and molds',
+            'More common in toenails than fingernails',
+            'Risk increases with age',
+            'Spreads in warm, moist environments like pools and showers',
+            'Associated with athlete\'s foot infection'
         ],
         'symptoms': [
-            'Thickened nail',
+            'Thickened nails',
             'Whitish to yellow-brown discoloration',
-            'Brittleness, crumbling or ragged nail',
+            'Brittleness, crumbling or ragged nails',
             'Distorted nail shape',
             'Dark color due to debris buildup under nail',
-            'Slightly foul smell'
+            'Slight odor'
+        ],
+        'complications': [
+            'Pain and discomfort',
+            'Permanent nail damage',
+            'Spread to other nails',
+            'Secondary bacterial infections',
+            'Difficulty walking or wearing shoes',
+            'Cellulitis in severe cases'
         ],
         'treatment': [
-            'Oral antifungal medications (most effective)',
+            'Oral antifungal medications (terbinafine, itraconazole)',
             'Medicated nail polish (ciclopirox)',
             'Medicated nail cream',
-            'Laser treatment',
-            'In severe cases, nail removal'
+            'Nail removal in severe cases',
+            'Laser therapy (emerging treatment)',
+            'Tea tree oil as complementary treatment'
         ],
         'prevention': [
-            'Wash hands and feet regularly',
-            'Trim nails straight across and file down thickened areas',
-            'Wear moisture-wicking socks',
-            'Change socks daily or more often if feet sweat',
-            'Wear shoes that allow ventilation',
-            'Wear sandals in public showers and pools'
+            'Wearing shower shoes in public areas',
+            'Keeping nails clean and dry',
+            'Trimming nails straight across',
+            'Wearing breathable shoes',
+            'Changing socks daily',
+            'Not sharing nail clippers'
         ],
-        'duration': 'Several months to a year for complete resolution',
+        'duration': 'Treatment typically takes 6-12 months for toenails due to slow growth',
         'when_to_see_doctor': [
-            'If you have diabetes and suspect nail fungus',
-            'If you have signs of infection (redness, warmth, pus)',
-            'If the infection spreads to other nails',
-            'If you have pain or discomfort in the affected nail',
-            'If home treatments aren\'t working after several months'
+            'If you have diabetes',
+            'If you notice signs of infection',
+            'If pain affects daily activities',
+            'If the condition worsens despite home treatment',
+            'If you have circulation problems'
         ]
     },
     'FU-ringworm': {
         'name': 'Ringworm',
-        'description': 'Ringworm (tinea corporis) is a common fungal skin infection that causes a ring-shaped rash. Despite its name, it has nothing to do with worms. The infection is caused by a type of fungus called a dermatophyte.',
+        'description': 'Ringworm (tinea corporis) is a common fungal skin infection that causes a ring-shaped rash on the skin. Despite its name, it\'s not caused by a worm. It\'s highly contagious and can spread through direct contact with an infected person or animal, or from contact with contaminated surfaces.',
         'causes': [
             'Caused by dermatophyte fungi',
             'Spreads through direct skin-to-skin contact',
-            'Can spread from animals to humans',
-            'Can spread through contact with contaminated objects',
-            'More common in warm, humid climates'
+            'Contact with contaminated surfaces (towels, clothing, bedding)',
+            'Contact with infected animals (especially cats)',
+            'Warm, moist environments increase risk'
         ],
         'symptoms': [
-            'Circular, red, scaly patch of skin',
-            'Clearer skin in the middle of the ring',
-            'Slightly raised, expanding ring',
-            'Itching',
-            'Blisters or oozing in some cases'
+            'Ring-shaped, red, itchy rash with raised edges',
+            'Clearing in the center of the ring',
+            'Scaly, cracked skin',
+            'Blisters in some cases',
+            'Multiple rings that may overlap',
+            'Hair loss in affected areas of the scalp'
+        ],
+        'complications': [
+            'Spread to other body areas',
+            'Secondary bacterial infection from scratching',
+            'Permanent hair loss (with scalp ringworm)',
+            'Nail deformities (if spreads to nails)',
+            'Kerion (inflamed, pus-filled areas on scalp)',
+            'Chronic, recurring infections'
         ],
         'treatment': [
-            'Over-the-counter antifungal creams, lotions, or powders',
+            'Over-the-counter antifungal creams, ointments, or sprays',
             'Prescription-strength topical medications for severe cases',
-            'Oral antifungal medications for widespread infection',
+            'Oral antifungal medications for widespread infections',
+            'Antifungal shampoo for scalp ringworm',
             'Keeping the area clean and dry',
-            'Washing bedding and clothing frequently'
+            'Washing contaminated clothing in hot water'
         ],
         'prevention': [
-            'Avoiding direct contact with infected people or animals',
-            'Not sharing personal items like towels, clothing, or hairbrushes',
-            'Washing hands after contact with pets',
+            'Avoiding contact with infected people or animals',
+            'Not sharing personal items like towels or clothing',
             'Wearing loose-fitting clothing',
-            'Keeping skin clean and dry'
+            'Keeping skin clean and dry',
+            'Washing hands after contact with pets',
+            'Using antifungal powder in shoes'
         ],
-        'duration': '2-4 weeks with proper treatment',
+        'duration': '2-4 weeks with proper treatment; may take longer for scalp infections',
         'when_to_see_doctor': [
-            'If the rash is painful or shows signs of infection',
             'If the rash doesn\'t improve after 2 weeks of OTC treatment',
-            'If the rash is widespread or covers a large area',
+            'If the rash is painful or shows signs of infection',
+            'If the rash is on your scalp',
             'If you have a weakened immune system',
             'If the rash spreads rapidly'
         ]
@@ -347,213 +462,252 @@ DISEASE_INFO = {
         'description': 'Cutaneous larva migrans (CLM), also known as "creeping eruption," is a skin disease caused by hookworm larvae that have penetrated the skin. It\'s characterized by an itchy, winding rash that moves or "migrates" across the skin.',
         'causes': [
             'Caused by hookworm larvae (usually from dog or cat feces)',
-            'Larvae penetrate skin through contact with contaminated soil',
+            'Larvae penetrate skin through direct contact with contaminated soil/sand',
             'Common in tropical and subtropical regions',
-            'More common in people who walk barefoot on contaminated soil'
+            'More likely when walking barefoot on contaminated beaches',
+            'Not spread from person to person'
         ],
         'symptoms': [
-            'Winding, snake-like rash that moves or "migrates"',
-            'Intense itching at the site of the rash',
-            'Red, raised tracks on the skin',
-            'Blisters may form in some cases',
-            'Rash typically appears 1-5 days after exposure'
+            'Intensely itchy, winding red tracks on the skin',
+            'Raised, snake-like lines that grow longer each day',
+            'Small blisters at the start of the tracks',
+            'Redness and swelling around the tracks',
+            'Burning sensation in affected areas',
+            'Tracks typically appear 1-5 days after exposure'
+        ],
+        'complications': [
+            'Secondary bacterial infection from scratching',
+            'Persistent itching for weeks or months',
+            'Scarring from scratching',
+            'Sleep disturbances due to itching',
+            'Superinfection with other organisms',
+            'Rarely, larvae may migrate to other organs'
         ],
         'treatment': [
-            'Antiparasitic medications (albendazole or ivermectin)',
-            'Topical thiabendazole for mild cases',
+            'Antiparasitic medications (ivermectin, albendazole)',
+            'Topical thiabendazole (less effective than oral)',
             'Antihistamines for itching',
-            'Keeping the area clean to prevent secondary infection'
+            'Topical corticosteroids for inflammation',
+            'Cool compresses for symptom relief',
+            'Keeping nails short to prevent skin damage from scratching'
         ],
         'prevention': [
-            'Wearing shoes when walking on soil or sand',
-            'Avoiding sitting or lying directly on soil or sand',
+            'Wearing shoes on beaches in tropical areas',
+            'Using a barrier (towel, mat) when sitting on sand',
+            'Avoiding areas where animals defecate',
             'Proper disposal of pet feces',
-            'Regular deworming of pets',
-            'Using protective barriers when sitting on beaches'
+            'Good hand hygiene after outdoor activities'
         ],
-        'duration': 'Several weeks without treatment, but resolves with proper medication',
+        'duration': 'Without treatment: 4-8 weeks; With treatment: symptoms improve within days',
         'when_to_see_doctor': [
-            'If the rash is extremely itchy or painful',
-            'If the rash shows signs of secondary infection',
-            'If you develop fever or other systemic symptoms',
+            'If you suspect CLM after traveling to tropical areas',
+            'If itching is severe and disrupting sleep',
+            'If signs of secondary infection (pus, increased redness)',
             'If the rash spreads rapidly',
-            'If you have a weakened immune system'
+            'If you\'re pregnant or immunocompromised'
         ]
     }
 }
 
-@st.cache_resource
+# Categories must match your training
+CATEGORIES = ['VI-chickenpox', 'BA- cellulitis', 'FU-athlete-foot', 
+              'BA-impetigo', 'FU-nail-fungus', 'FU-ringworm', 'PA-cutaneous-larva-migrans']
+
+# Image size must match your training
+IMG_SIZE = (192, 192)
+
+# Global variables to store models
+svm_model = None
+resnet_model = None
+
 def load_models():
-    """Load the models once and cache them"""
-    # Get directory where this script is located
-    script_dir = os.path.dirname(os.path.abspath(__file__))
-    models_dir = os.path.join(script_dir, "models")
+    """Load the models once at startup with memory considerations"""
+    global svm_model, resnet_model
     
     try:
-        # Load minimal SVM model
-        svm_model = load_minimal_svm_model(os.path.join(models_dir, 'svm_model_optimized.pkl'))
-        
-        # Load ResNet50 base model
-        resnet_model = load_model(os.path.join(models_dir, 'resnet50_base_model.h5'))
-        st.success("Models loaded successfully!")
-        return svm_model, resnet_model
-    except Exception as e:
-        st.error(f"Error loading models: {str(e)}")
-        st.error("Please make sure the model files are in the correct location.")
-        st.error(f"Script directory: {script_dir}")
-        st.error(f"Looking in: {models_dir}")
-        raise
-
-def preprocess_image(image):
-    """Preprocess the uploaded image for model prediction"""
-    try:
-        # Convert to RGB if it's a RGBA image
-        if image.mode == 'RGBA':
-            image = image.convert('RGB')
+        # Load SVM model
+        try:
+            with open(SVM_MODEL_PATH, 'rb') as f:
+                svm_model = pickle.load(f)
+            logger.info("SVM model loaded successfully")
+        except Exception as e:
+            logger.error(f"Error loading SVM model: {str(e)}")
+            return False
             
-        # Resize to model input size
-        img = image.resize((192, 192))
-        
-        # Convert to numpy array and preprocess
-        img_array = np.array(img)
-        img_array = preprocess_input(img_array)
-        
-        # Add batch dimension
-        img_array = np.expand_dims(img_array, axis=0)
-        
-        return img_array
+        # Load ResNet50 base model
+        try:
+            # Verify the model file exists
+            if not os.path.exists(RESNET_MODEL_PATH):
+                logger.error(f"ResNet model file not found at {RESNET_MODEL_PATH}")
+                return False
+                
+            resnet_model = load_model(RESNET_MODEL_PATH)
+            logger.info("ResNet50 model loaded successfully on CPU")
+            return True
+        except Exception as e:
+            logger.error(f"Error loading ResNet model: {str(e)}")
+            return False
+            
     except Exception as e:
-        st.error(f"Error in image preprocessing: {str(e)}")
+        logger.error(f"Error loading models: {str(e)}")
+        return False
+
+def preprocess_image(image_path):
+    """Preprocess the image for prediction"""
+    try:
+        # Open and convert image
+        image = Image.open(image_path)
+        img = np.array(image)
+        
+        # Handle RGBA images
+        if img.shape[2] == 4:
+            img = cv2.cvtColor(img, cv2.COLOR_RGBA2RGB)
+            
+        # Resize
+        img = cv2.resize(img, IMG_SIZE)
+        
+        # Contrast Enhancement (CLAHE)
+        try:
+            lab = cv2.cvtColor(img, cv2.COLOR_BGR2LAB)
+            l, a, b = cv2.split(lab)
+            clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
+            l = clahe.apply(l)
+            lab = cv2.merge([l, a, b])
+            img = cv2.cvtColor(lab, cv2.COLOR_LAB2BGR)
+        except Exception as e:
+            logger.warning(f"CLAHE enhancement failed, using original image. Error: {str(e)}")
+        
+        # Convert to float32 and preprocess for ResNet50
+        img = img.astype(np.float32)
+        img = preprocess_input(img)
+        
+        return np.expand_dims(img, axis=0)
+    except Exception as e:
+        logger.error(f"Error in image preprocessing: {str(e)}")
         raise
 
-def generate_report(disease_id):
-    """Generate a medical report for the predicted disease"""
-    disease_info = DISEASE_INFO.get(disease_id)
-    if not disease_info:
-        st.error("Disease information not available.")
-        return
-    
-    st.subheader(f"{disease_info['name']} Medical Report")
-    
-    # Add disclaimer
-    st.warning("MEDICAL DISCLAIMER: This report provides general information and is for educational purposes only. It is not intended as medical advice, diagnosis, or treatment. Always seek the advice of your physician or other qualified health provider with any questions you may have regarding a medical condition.")
-    
-    # Overview
-    st.markdown("### Overview")
-    st.write(disease_info['description'])
-    
-    # Key information in columns
-    col1, col2, col3 = st.columns(3)
-    with col1:
-        st.markdown("**Duration**")
-        st.write(disease_info['duration'])
-    with col2:
-        st.markdown("**Contagious**")
-        st.write("Yes" if disease_id in ['VI-chickenpox', 'BA-cellulitis', 'FU-athlete-foot', 'BA-impetigo', 'FU-ringworm'] else "No")
-    with col3:
-        st.markdown("**Severity**")
-        st.write("Moderate" if disease_id in ['BA-cellulitis', 'BA-impetigo'] else "Mild")
-    
-    # Causes
-    st.markdown("### Causes")
-    for cause in disease_info['causes']:
-        st.markdown(f"- {cause}")
-    
-    # Symptoms
-    st.markdown("### Symptoms")
-    for symptom in disease_info['symptoms']:
-        st.markdown(f"- {symptom}")
-    
-    # Treatment
-    st.markdown("### Treatment Options")
-    for treatment in disease_info['treatment']:
-        st.markdown(f"- {treatment}")
-    
-    # Recovery time
-    st.info(f"**Expected Recovery Time:** {disease_info['duration']}")
-    
-    # Prevention
-    st.markdown("### Prevention Strategies")
-    for prevention in disease_info['prevention']:
-        st.markdown(f"- {prevention}")
-    
-    # When to see doctor
-    st.markdown("### When to See a Doctor")
-    for when in disease_info['when_to_see_doctor']:
-        st.markdown(f"- {when}")
-
-# Main app
-def main():
-    st.title("🏥 Skin Disease Detection System")
-    st.markdown("Upload a skin image for analysis. *This tool is for educational purposes only and not a substitute for professional medical advice.*")
-    
-    # Load models
-    svm_model, resnet_model = load_models()
-    
-    # File uploader
-    uploaded_file = st.file_uploader("Choose an image...", type=["jpg", "jpeg", "png"])
-    
-    if uploaded_file is not None:
-        # Display the uploaded image
-        image = Image.open(uploaded_file)
-        st.image(image, caption='Uploaded Image', use_column_width=True)
+def predict_disease(image_path):
+    """Predict the disease from an image"""
+    try:
+        # Preprocess image
+        processed_img = preprocess_image(image_path)
         
-        # Process button
-        if st.button('Analyze Image'):
-            with st.spinner('Analyzing image...'):
-                try:
-                    # Preprocess the image
-                    processed_image = preprocess_image(image)
-                    
-                    # Extract features using ResNet50
-                    features = resnet_model.predict(processed_image)
-                    
-                    # Reshape features for SVM
-                    features_flat = features.reshape(1, -1)
-                    
-                    # Predict using SVM
-                    prediction = svm_model.predict(features_flat)[0]
-                    
-                    # Get probability scores
-                    try:
-                        probabilities = svm_model.predict_proba(features_flat)[0]
-                        confidence = round(float(np.max(probabilities)) * 100, 2)
-                    except:
-                        confidence = 90.0  # Default confidence if probabilities aren't available
-                    
-                    # Define categories
-                    Categories = [
-                        'VI-chickenpox', 
-                        'BA-cellulitis', 
-                        'FU-athlete-foot', 
-                        'BA-impetigo', 
-                        'FU-nail-fungus', 
-                        'FU-ringworm', 
-                        'PA-cutaneous-larva-migrans'
-                    ]
-                    
-                    predicted_label = Categories[prediction]
-                    
-                    if '-' in predicted_label:
-                        disease_name = predicted_label.split('-')[1].replace('-', ' ').title()
-                        category = predicted_label.split('-')[0]
-                    else:
-                        disease_name = predicted_label
-                        category = ""
-                    
-                    # Display results
-                    st.success(f"Predicted Disease: **{disease_name}**")
-                    st.info(f"Confidence: **{confidence}%**")
-                    
-                    # Show confidence bar
-                    st.progress(int(confidence))
-                    
-                    # Generate medical report
-                    generate_report(predicted_label)
-                    
-                except Exception as e:
-                    st.error(f"Error during analysis: {str(e)}")
-                    st.error("Please try a different image or contact support.")
+        # Extract features using ResNet
+        features = resnet_model.predict(processed_img)
+        features_flat = features.reshape(1, -1)
+        
+        # Convert to float16 as in your training script
+        features_flat = features_flat.astype(np.float16)
+        
+        # Make prediction using SVM
+        prediction_idx = svm_model.predict(features_flat)[0]
+        predicted_label = CATEGORIES[prediction_idx]
+        
+        # Get probability scores with validation
+        try:
+            probabilities = svm_model.predict_proba(features_flat)[0]
+            # Validate probabilities
+            if not np.isclose(probabilities.sum(), 1.0, atol=0.01):
+                logger.warning(f"Invalid probabilities sum: {probabilities.sum()}")
+                confidence = 90.0
+            else:
+                confidence = round(float(np.max(probabilities)) * 100, 2)
+        except Exception as e:
+            logger.error(f"Probability error: {str(e)}")
+            confidence = 90.0  # Default if probabilities fail
+        
+        logger.info(f"Prediction: {predicted_label} ({confidence}%) | Probabilities: {probabilities}")
+        return predicted_label, confidence
+    except Exception as e:
+        logger.error(f"Prediction error: {str(e)}")
+        raise
 
-if __name__ == "__main__":
-    main()
+# Routes
+@app.route('/')
+def index():
+    return render_template('index.html')
+
+@app.route('/predict', methods=['POST'])
+def predict():
+    if 'file' not in request.files:
+        return render_template('error.html', message="No file part in the request")
+    
+    file = request.files['file']
+    if file.filename == '':
+        return render_template('error.html', message="No file selected")
+    
+    if file:
+        # Save the uploaded file
+        filename = file.filename
+        filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
+        file.save(filepath)
+        
+        try:
+            # Make prediction
+            predicted_label, confidence = predict_disease(filepath)
+            
+            # Get disease name for display
+            if '-' in predicted_label:
+                disease_name = predicted_label.split('-')[1].replace('-', ' ').title()
+            else:
+                disease_name = predicted_label
+            
+            # Clean up the uploaded file
+            os.remove(filepath)
+            
+            return render_template('result.html', 
+                                  prediction=disease_name,
+                                  confidence=confidence,
+                                  disease_id=predicted_label)
+        except Exception as e:
+            # Clean up the uploaded file in case of error
+            if os.path.exists(filepath):
+                os.remove(filepath)
+            return render_template('error.html', message=f"Error processing image: {str(e)}")
+    
+    return render_template('error.html', message="Unknown error occurred")
+
+@app.route('/report/<disease_id>')
+def report(disease_id):
+    if disease_id not in DISEASE_INFO:
+        return render_template('error.html', message="Invalid disease ID")
+    
+    disease = DISEASE_INFO[disease_id]
+    return render_template('report.html', disease=disease, disease_id=disease_id)
+
+@app.route('/error')
+def error():
+    message = request.args.get('message', 'An error occurred')
+    return render_template('error.html', message=message)
+
+if __name__ == '__main__':
+    # Verify model files exist before trying to load
+    if not os.path.exists(SVM_MODEL_PATH):
+        logger.error(f"SVM model file not found at {SVM_MODEL_PATH}")
+        logger.error("Please check your model path and ensure the file exists")
+        logger.error("Current working directory: " + os.getcwd())
+        logger.error("BASE_DIR: " + BASE_DIR)
+        logger.error("MODEL_DIR: " + MODEL_DIR)
+        exit(1)
+        
+    if not os.path.exists(RESNET_MODEL_PATH):
+        logger.error(f"ResNet model file not found at {RESNET_MODEL_PATH}")
+        logger.error("Please check your model path and ensure the file exists")
+        logger.error("Current working directory: " + os.getcwd())
+        logger.error("BASE_DIR: " + BASE_DIR)
+        logger.error("MODEL_DIR: " + MODEL_DIR)
+        exit(1)
+    
+    # Load models before starting the server
+    if not load_models():
+        logger.error("Failed to load models. Application cannot start.")
+        logger.error("Possible solutions:")
+        logger.error("1. Verify model files exist at the specified paths")
+        logger.error("2. Ensure you have enough RAM (at least 4GB free)")
+        logger.error("3. Try running with CPU only (already enforced)")
+        logger.error("4. Reduce model size or use a smaller model")
+        exit(1)
+    
+    # Run the Flask app
+    logger.info("Starting Flask application on http://127.0.0.1:5000")
+    app.run(debug=True, port=5000)
